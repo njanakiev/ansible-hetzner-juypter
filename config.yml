@@ -1,0 +1,9 @@
+---
+hcloud_ssh_key_name: ansible-ssh-key
+
+server_name: jupyterserver
+server_type: cx11
+server_image: ubuntu-20.04
+server_location: nbg1
+
+ssh_keys: ~/.ssh/hetzner.pub

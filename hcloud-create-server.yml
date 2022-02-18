@@ -1,0 +1,119 @@
+---
+- name: Create Hetzner server.
+  hosts: localhost
+  gather_facts: false
+  vars:
+    hcloud_token: "{{ lookup('env', 'HCLOUD_TOKEN') }}"
+  
+  vars_files:
+  - config.yml
+
+  pre_tasks:
+  - name: Create Hetzner server.
+    hcloud_server:
+      api_token: "{{ hcloud_token }}"
+      name: "{{ server_name }}"
+      server_type: "{{ server_type }}"
+      location: "{{ server_location }}"
+      image: "{{ server_image }}"
+      ssh_keys:
+      - "{{ hcloud_ssh_key_name }}"
+      labels:
+        project=linode-jupyter-setup
+      state: present
+    register: server
+
+  - name: Refresh inventory after adding server.
+    meta: refresh_inventory
+
+  - name: Remove host keys of servers.
+    known_hosts:
+      name: "{{ server.hcloud_server.ipv4_address }}"
+      path: ~/.ssh/known_hosts
+      state: absent
+
+  - name: Wait until server is ready.
+    wait_for:
+      host: "{{ server.hcloud_server.ipv4_address }}"
+      port: 22
+      search_regex: OpenSSH
+      delay: 2
+      timeout: 300
+
+
+- name: Setup server.
+  hosts: all
+  user: root
+  gather_facts: false
+  vars:
+    username: "{{ lookup('env', 'SERVER_USERNAME') }}"
+    password: "{{ lookup('env', 'SERVER_PASSWORD') }}"
+
+  vars_files:
+  - config.yml
+
+  tasks:
+  - name: "Create user {{ username }}."
+    user:
+      name: "{{ username }}"
+      password: "{{ password | password_hash('sha512') }}"
+      groups: sudo
+      shell: /bin/bash
+      append: true
+
+  - name: "Add SSH key to {{ username }}."
+    authorized_key:
+      user: "{{ username }}"
+      state: present
+      key: "{{ lookup('file', ssh_keys) }}"
+
+  - name: Add Python repository.
+    apt_repository:
+      repo: 'ppa:deadsnakes/ppa'
+
+  - name: Install Python.
+    apt:
+      name: "{{ item }}"
+      state: present
+      update_cache: true
+    loop:
+    - python3.9
+    - python3.9-dev
+    - python-is-python3
+    - python3-pip
+
+  - name: Copy requirements.txt for Python.
+    copy:
+      src: jupyter/requirements.txt
+      dest: /root/requirements.txt
+
+  - name: Install requirements.txt.
+    pip:
+      requirements: /root/requirements.txt
+
+  - import_tasks: tasks/install-jupyter-service.yml
+
+  - name: Synchronize notebooks folder.
+    synchronize:
+      src: notebooks
+      dest: "/home/{{ username }}/"
+    
+  - name: Copy .tmux.conf.
+    copy:
+      src: .tmux.conf
+      dest: "/home/{{ username }}/.tmux.conf"
+      owner: "{{ username }}"
+      group: "{{ username }}"
+      mode: 0664
+
+  - name: Install packages.
+    apt:
+      name: "{{ item }}"
+      state: present
+      update_cache: true
+      cache_valid_time: 3600
+      install_recommends: false
+    loop:
+    - tree
+    - htop
+    - tmux

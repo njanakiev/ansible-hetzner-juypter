@@ -1,0 +1,4 @@
+plugin: hcloud
+
+label_selector:
+  project=linode-jupyter-setup
